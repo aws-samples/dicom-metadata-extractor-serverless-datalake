@@ -1,0 +1,568 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: A sample cloudformation template to deploy infrastructure for Dicom Metadata Parser
+
+Parameters:
+  S3InputBucketName:
+    Type: String
+    Description: Name of S3 Bucket where DICOM file are located
+  S3OutputBucketName:
+    Type: String
+    Description: Name of S3 Bucket DICOM metadata is placed
+  VpcBatch:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID to launch compute resources into.
+  SubnetsBatch:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnets to run AWS Batch Fargate tasks
+  ContainerMemory:
+    Type: String
+    Description: MiB allocated to AWS Batch Container
+    Default: 1024
+  ContainervCPU:
+    Type: String
+    Description: Number of vCPUS reserved for the job.
+    Default: 0.5
+  LambdaMemory:
+    Type: Number
+    Description: MiB allocated to AWS Lambda Function
+    Default: 256
+  LambdaDuration:
+    Type: Number
+    Description: Max duration of Lambda Runtime
+    Default: 600
+  AssignPublicIp:
+    Type: String
+    AllowedValues:
+      - DISABLED
+      - ENABLED
+    Default: ENABLED
+    Description: Assigned Public IPs to containers, if placing in private subnet can be DISABLED.
+  PartitionKey:
+    Type: String
+    AllowedValues:
+      - study_date
+    Default: study_date
+    Description: Partition the S3 data by key
+  GlueTableName:
+    Type: String
+    Description: Name of Dicom meta table
+    Default: dicom_metadata
+  LogLevel:
+    Type: String
+    Description: Set Log Level of Application
+    AllowedValues:
+      - INFO
+      - DEBUG
+    Default: INFO
+  VersionDescription:
+    Type: String
+    Description: Unique description to pass to Dicom parser lambda version
+    Default: 1
+Resources:
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: KMS Key used by Dicom Parser
+      EnableKeyRotation: true
+      PendingWindowInDays: 20
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: Dicom Parser KMS Key
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow EventBridge Service
+            Effect: Allow
+            Principal:
+              Service: 
+                - events.amazonaws.com
+            Action:
+             - kms:Decrypt
+             - kms:GenerateDataKey
+            Resource: '*'
+  KeyAlias:
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}'
+      TargetKeyId: !Ref KMSKey
+  S3OutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3OutputBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  S3InputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3InputBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: dicom-dead-letter-queue
+      # if adding KMSKey, ensure all IAM roles have permission to kms:Decrypt
+      KmsMasterKeyId: !Ref KeyAlias
+   
+  DeadLetterQueuePolicy: 
+    Type: AWS::SQS::QueuePolicy
+    Properties: 
+      Queues: 
+        - !Ref DeadLetterQueue
+      PolicyDocument: 
+        Statement: 
+          - 
+            Action: 
+              - "sqs:SendMessage"
+            Effect: "Allow"
+            Resource: !GetAtt DeadLetterQueue.Arn
+            Principal:  
+              Service: 
+                - "events.amazonaws.com"     
+            Condition:
+              ArnEquals : 
+                "aws:SourceArn": !GetAtt  DicomEventRule.Arn
+      
+  BatchCompute:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: Managed
+      ComputeEnvironmentName: dicom-compute
+      ComputeResources:
+        MaxvCpus: 2
+        Subnets: !Ref SubnetsBatch
+        Type: FARGATE_SPOT
+        SecurityGroupIds:
+          - !GetAtt SecurityGroup.GroupId
+  BatchQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: dicom-queue
+      ComputeEnvironmentOrder:
+        - ComputeEnvironment: !Ref BatchCompute
+          Order: 1
+      Priority: 1
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Dicom AWS Batch Fargate SecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: TCP
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VpcBatch
+  DicomParser:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      FunctionName: dicom-lambda-image
+      AutoPublishAlias: live
+      VersionDescription: !Ref VersionDescription
+      DeploymentPreference:
+        Enabled: True
+        Type: AllAtOnce
+      DeadLetterQueue:
+        TargetArn: !GetAtt DeadLetterQueue.Arn
+        Type: SQS
+      CodeUri: ../src/
+      Timeout: !Ref LambdaDuration
+      MemorySize: !Ref LambdaMemory
+      PackageType: Image
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref S3InputBucket
+            Events: s3:ObjectCreated:*
+      Environment:
+        Variables:
+          S3_OUTPUT_BUCKET: !Ref S3OutputBucket
+          S3_OUTPUT_BUCKET_REGION: !Ref AWS::Region
+          LOGLEVEL: !Ref LogLevel
+          GLUE_DATABASE_NAME: !Ref GlueDatabase
+          GLUE_DATABASE_TABLE: !Ref GlueTableName
+          AWS_BATCH_QUEUE: !Ref BatchQueue
+    Metadata:
+      Dockerfile: Dockerfile.lambda
+      DockerContext: ../
+      DockerTag: latest
+  CustomGetImageResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: DicomParser
+    Properties:
+      ServiceToken: !GetAtt "CustomGetImageFunction.Arn"
+      LambdaName: dicom-lambda-image
+      LambdaAlias: !Ref DicomParserAliaslive
+      VersionDescription: !Ref VersionDescription
+      CodeDeployGroup: !Ref DicomParserDeploymentGroup
+
+  CustomGetImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.lambda_handler
+      Description: "Retrieves Lambda Image Uri"
+      PackageType: Zip
+      Policies:
+        - AWSLambdaExecute
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunction
+              Resource: !GetAtt DicomParser.Arn
+      Timeout: 30
+      # python 3.7 includes cfn-response module
+      Runtime: python3.7
+      InlineCode: |
+        import logging
+        import cfnresponse
+        import boto3
+
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        def lambda_handler(event, context):
+          logger.info(f'Event: {event}')  
+          try: 
+            responseData = {}
+            if event['RequestType'] == 'Delete':
+              logger.info('Delete operation - Skip all actions') 
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            if event['RequestType'] in ["Create", "Update"]:                      
+              LambdaName=event['ResourceProperties']['LambdaName']
+              client = boto3.client('lambda')
+              response = client.get_function(FunctionName=LambdaName,Qualifier='live')
+              responseData = {}
+              responseData['ImageUri']= response.get('Code').get('ImageUri')
+              logger.info('Retrieved ImageUri!')
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            else:
+              logger.info(f"Not Valid Request Type {event['RequestType']}") 
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+          except Exception as err:
+            logger.error(err)
+            responseData = {"Msg": str(err)}
+            cfnresponse.send(event,context,cfnresponse.FAILED,responseData)
+          return
+  BatchJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: dicom-parser
+      Type: container
+      PropagateTags: true
+      PlatformCapabilities:
+        - FARGATE
+      ContainerProperties:
+        Image: !GetAtt CustomGetImageResource.ImageUri
+        User: dicom
+        JobRoleArn: !GetAtt ExecutionRole.Arn
+        ResourceRequirements:
+          - Type: VCPU
+            Value: !Ref ContainervCPU
+          - Type: MEMORY
+            Value: !Ref ContainerMemory
+        NetworkConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+        ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+        Environment:
+          - Name: S3_OUTPUT_BUCKET
+            Value: !Ref S3OutputBucket
+          - Name: S3_OUTPUT_BUCKET_REGION
+            Value: !Ref AWS::Region
+          - Name: LOGLEVEL
+            Value: !Ref LogLevel
+          - Name: GLUE_DATABASE_NAME
+            Value: !Ref GlueDatabase
+          - Name: GLUE_DATABASE_TABLE
+            Value: !Ref GlueTableName
+        Command:
+          - app.py
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            "awslogs-group": !Ref LogGroup
+            "awslogs-stream-prefix": "job"
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: dicom-batch-ExecutionRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  PermissionForS3ToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref "DicomParser"
+      Action: "lambda:InvokeFunction"
+      Principal: "s3.amazonaws.com"
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt S3InputBucket.Arn
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SendToSQS
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt DeadLetterQueue.Arn
+  ExecutionRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref ExecutionRole
+        - !Ref LambdaRole
+      PolicyName: dicom-ExecutionRoleS3Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub "arn:aws:s3:::${S3InputBucketName}/*"
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:PutObjectTagging
+            Resource:
+              - !Sub "${S3OutputBucket.Arn}/*"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:DescribeLogStreams"
+              - "logs:PutLogEvents"
+              - "logs:GetLogEvents"
+            Resource:
+              - !GetAtt LogGroup.Arn
+          - Effect: Allow
+            Action:
+              - glue:GetTable
+              - glue:UpdateTable
+              - glue:BatchCreatePartition
+            Resource:
+              - !Sub "arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+              - !Sub "arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${GlueDatabase}"
+              - !Sub "arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${GlueDatabase}/${GlueTable}"
+  KMSKeyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref ExecutionRole
+        - !Ref LambdaRole
+      PolicyName: dicom-KMSKey-Policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource:
+              - !GetAtt KMSKey.Arn
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: dicom-parser
+      RetentionInDays: 7
+  LambdaAWSBatchRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - batch:SubmitJob
+            Resource:
+              - !Ref BatchQueue
+              - !Sub arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/dicom-parser
+      Roles:
+        - !Ref LambdaRole
+      PolicyName: dicom-lambda-execution-aws-batch-policy
+ 
+      PolicyName: dicom-event-rule-dead-letter-policy
+
+  DicomEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: dicom-batch-event-rule
+      State: ENABLED
+      EventBusName: default
+      # RoleArn: !GetAtt EventRuleRole.Arn
+      EventPattern:
+        source:
+          - aws.batch
+        detail-type:
+          - Batch Job State Change
+        detail:
+          status:
+            - FAILED
+          jobQueue:
+            - !Ref BatchQueue
+      Targets:
+        - Arn: !GetAtt DeadLetterQueue.Arn
+          Id: DeadLetterQueue
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: dicom_db
+        Description: Dicom Metadata Source
+
+  GlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: dicom-crawler
+      Role: !GetAtt GlueCrawlerRole.Arn
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+      Configuration: '{"Version":1.0,"CrawlerOutput":{"Partitions":{"AddOrUpdateBehavior":"InheritFromTable"}},"Grouping":{"TableGroupingPolicy":"CombineCompatibleSchemas"}}'
+      Targets:
+        CatalogTargets:
+          - DatabaseName: !Ref GlueDatabase
+            Tables:
+              - !Ref GlueTableName
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: "DicomGlueCrawler"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:PutObjectTagging
+
+                Resource:
+                  - !Sub ${S3OutputBucket.Arn}/*
+
+  GlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref GlueDatabase
+      TableInput:
+        Name: !Ref GlueTableName
+        Parameters:
+          {
+            "projection.enabled": "false",
+            "compressionType": "snappy",
+            "typeOfData": "file",
+            "classification": "parquet",
+          }
+        PartitionKeys:
+        - Name: !Ref PartitionKey
+          Type: "date"
+        TableType: EXTERNAL_TABLE
+        StorageDescriptor:
+          Location: !Sub "s3://${S3OutputBucket}/"
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          Compressed: true
+          SerdeInfo:
+            {
+              SerializationLibrary: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe",
+              Parameters: { "serialization.format": "1" },
+            }
+          Columns:
+            - Name: modality
+              Type: string
+            - Name: sopclass_uid
+              Type: string
+            - Name: study_time
+              Type: string
+            - Name: study_id
+              Type: string
+            - Name: series_number
+              Type: string
+            - Name: patient_sex
+              Type: string
+            - Name: patient_birth_date
+              Type: date
+            - Name: patient_age
+              Type: string
+            - Name: patient_orientation
+              Type: array<string>
+            - Name: patient_weight
+              Type: string
+            - Name: image_comments
+              Type: string  
+            - Name: source_s3_bucket
+              Type: string
+            - Name: source_s3_region
+              Type: string
+            - Name: source_s3_key
+              Type: string
+            - Name: source_s3_archive_path
+              Type: string
+
+             

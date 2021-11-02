@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__
+.vscode
+.venv
+.env
+.aws-sam
+*parameters.json
+packages
+upload.zip
+event.json
+env.json
+*.dcm
+*.bak
+*.toml
+src/local_lambda.py
+sample.py
+src/VERSION
