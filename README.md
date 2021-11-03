@@ -28,8 +28,8 @@ The template can be deployed via web console or via CLI.
 Install the AWS Serverless Application Model (SAM) CLI using these [instructions](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
 
 ```sh
-git clone github.com/aws-samples/dicom-metadata-extractor-datalake.git
-cd dicom-metadata-extractor-datalake/
+git clone https://github.com/aws-samples/dicom-metadata-extractor-serverless-datalake.git
+cd dicom-metadata-extractor-serverless-datalake/
 ```
 
 Build the application using SAM
