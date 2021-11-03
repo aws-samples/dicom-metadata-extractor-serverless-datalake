@@ -20,7 +20,8 @@ def unzip(zip_archive):
                 list_files.append(zip_archive.open(file))
                 log.debug(f'Added "{file.filename}" to process queue')
             else:
-                log.info(f'Ignore File in ZipFile, Not Valid DCM file "{file.filename}"')
+                log.info(
+                    f'Ignore File in ZipFile, Not Valid DCM file "{file.filename}"')
             f.close()
         else:
             log.info(f'Ignore file-path in ZipFile "{file.filename}"')
@@ -28,19 +29,22 @@ def unzip(zip_archive):
 
 
 def tar(tar_archive):
-    log.debug(f'Prep to tar/bz2 {tar_archive.name}')
+    log.debug(f'Prep to tar/bz2/gz {tar_archive.name}')
     list_files = []
     for file in tar_archive.getmembers():
         if file.isfile() and (file.name.upper().find('DICOMDIR') == -1):
             f = tar_archive.extractfile(file)
             if check_dcm(f):
-                list_files.append(tar_archive.extractfile(file))
+                tarfile = tar_archive.extractfile(file)
+                tarfile.tarname = file.name
+                list_files.append(tarfile)
                 log.debug(f'Added {file.name} to process queue')
             else:
-                log.info(f'Ignore File in TarFile, Not Valid DCM files "{file.name}"')
+                log.info(
+                    f'Ignore File in TarFile, Not Valid DCM files "{file.name}"')
             f.close()
         else:
-            log.info(f'Ignore file-path in TarFile"{tar_archive.name}"')
+            log.info(f'Ignore file-path in TarFile "{file.name}"')
     return list_files
 
 
@@ -55,6 +59,9 @@ def check_dcm(file):
 
 
 def getname(name):
-    if hasattr(name, 'name'):
+    if hasattr(name, 'tarname'):
+        return name.tarname
+    elif hasattr(name, 'name'):
         return name.name
-    return os.path.split(name)[1]
+    else:
+        return os.path.split(name)[1]

@@ -90,11 +90,23 @@ aws s3 cp --recursive sample_dcm/ s3://S3InputBucketName/example/
 
 Go to the Athena Web [Console](https://console.aws.amazon.com/athena/home) and select Database as `dicom_db`. Then run the following query:
 
+Repair the table to update partitions
+
 ```
-Select  * from dicom_metadata
+MSCK REPAIR TABLE dicom_metadata;
+```
+
+Run the query to see the results
+
+```
+Select  * from dicom_metadata;
 ```
 
 ![ ](docs/images/athena_query.png)
+
+Navigate to the SQS Console to see the any error messages. We expect to see message for DICOMDIR as it is an empty file. If you do not see any messages the lambda function may performing retries before failing.
+
+![ ](docs/images/sqs_message.png)
 
 #### Advanced
 
@@ -177,4 +189,3 @@ Glue Crawler
 ```
 aws glue start-crawler --name dicom-crawler
 ```
-

@@ -8,11 +8,11 @@ from dateutil.relativedelta import relativedelta
 import random
 
 
-print('Generate single sample.dcm file')
+print('Generate single sample file')
 sopclassinstanceuid = generate_uid()
 color = random.choice(list(ImageColor.colormap.keys()))
 print(f'Generate DCM with {color} for pixels')
-file = f'sample_dcm/example-{random.randint(0,100)}.dcm'
+file = f'sample_dcm/example-{random.randint(0,100)}'
 list_dates = [datetime.today().strftime('%Y%m%d'), '19990101', '19870403']
 # File meta info data elements
 file_meta = FileMetaDataset()
@@ -43,7 +43,8 @@ ds.PatientName = 'EMPTY'
 ds.PatientID = 'ID1'
 ds.PatientSex = random.choice(['M', 'F'])
 ds.PatientAge = f'0{random.randint(1,99)}Y'
-ds.PatientBirthDate = (datetime.now() - relativedelta(years=int(ds.PatientAge.split('Y')[0]), months=random.randint(1, 10), days=random.randint(0, 30))).date().strftime('%Y%m%d')
+ds.PatientBirthDate = (datetime.now() - relativedelta(years=int(ds.PatientAge.split('Y')
+                       [0]), months=random.randint(1, 10), days=random.randint(0, 30))).date().strftime('%Y%m%d')
 ds.PatientPosition = ''
 ds.StudyInstanceUID = generate_uid()
 ds.SeriesInstanceUID = generate_uid()

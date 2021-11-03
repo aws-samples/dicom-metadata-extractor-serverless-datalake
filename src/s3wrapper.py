@@ -38,7 +38,8 @@ class s3file():
     def eval_ext(self):
         _, ext = os.path.splitext(self.s3_key)
         if ext in IGNORE_FILE_EXT:
-            log.info(f'File ext {ext} in IGNORE list , skip process and return success {self}')
+            log.info(
+                f'File ext {ext} in IGNORE list , skip process and return success {self}')
 
         self.set_file_ext(ext)
 
@@ -54,17 +55,21 @@ class s3file():
                 # Hard coded get only first 10MB of data or less
                 start = 0
                 end = 10000000
-                resp = self.s3_client.get_object(Bucket=self.s3_bucket, Key=self.s3_key, Range=f'bytes={start}-{end}')['Body'].read()
+                resp = self.s3_client.get_object(
+                    Bucket=self.s3_bucket, Key=self.s3_key, Range=f'bytes={start}-{end}')['Body'].read()
                 with open(f'{self.local_dir}/{self.s3_key}', 'wb+') as f:
                     f.write(resp)
-                log.debug(f'Completed bytes written {end} bytes to local location')
+                log.debug(
+                    f'Completed bytes written {end} bytes to local location')
             else:
-                self.s3_client.download_file(self.s3_bucket, self.s3_key, f'{self.local_dir}/{self.s3_key}')
+                self.s3_client.download_file(
+                    self.s3_bucket, self.s3_key, f'{self.local_dir}/{self.s3_key}')
             log.info(f'Completed download {self}')
             self.file_location = f'{self.local_dir}/{self.s3_key}'
 
         except Exception as e:
-            log.error(f'Unable to download file s3://{self.s3_bucket}/{self.s3_key} in region {self.s3_region}')
+            log.error(
+                f'Unable to download file s3://{self.s3_bucket}/{self.s3_key} in region {self.s3_region}')
             log.error(e)
             raise
 
@@ -74,7 +79,8 @@ class s3file():
             log.debug(f'Set file extension to be {ext}')
         else:
             default_ext = os.environ.get('DEFAULT_S3_FILE_EXTENTSION', '.dcm')
-            log.info(f'Unable to evaluate file ext:{ext}, continue assuming {default_ext}')
+            log.info(
+                f'Unable to evaluate file ext:{ext}, continue assuming {default_ext}')
             self.file_ext = default_ext
 
     def get(self):
@@ -82,7 +88,8 @@ class s3file():
         if (self.file_ext in IGNORE_FILE_EXT):
             log.info(f'File ext: {self.file_ext} is IGNORED')
         elif (self.file_ext == '.dcm'):
-            log.debug(f'Select .dcm file type for processing, return file location: {self.file_location}')
+            log.debug(
+                f'Select .dcm file type for processing, return file location: {self.file_location}')
             self.download_file()
             self.file_list.append(self.file_location)
         elif (self.file_ext == '.zip'):
@@ -91,13 +98,22 @@ class s3file():
                 archive = zipfile.ZipFile(self.file_location, 'r')
                 self.file_list = utils.unzip(archive)
             else:
-                log.error(f'Invalid ZipFile {self} downloaded to {self.file_location}')
+                log.error(
+                    f'Invalid ZipFile {self} downloaded to {self.file_location}')
                 raise
         elif (self.file_ext == '.bz2'):
-            log.error(f'bz2 file extension not supported')
-            raise Exception(f'.bz2 file extension not supported')
+            log.info(f'Select .bz2 file extension, continue assuming tar.bz2')
+            self.download_file()
+            archive = tarfile.open(self.file_location, 'r')
+            self.file_list = utils.tar(archive)
         elif (self.file_ext == '.tar'):
-            log.info(f'Select .tar file type for processing {self.file_location}')
+            log.info(
+                f'Select .tar file type for processing {self.file_location}')
+            self.download_file()
+            archive = tarfile.open(self.file_location, 'r')
+            self.file_list = utils.tar(archive)
+        elif (self.file_ext == '.gz'):
+            log.info(f'Select .gz file extension, continue assuming tar.gz')
             self.download_file()
             archive = tarfile.open(self.file_location, 'r')
             self.file_list = utils.tar(archive)
