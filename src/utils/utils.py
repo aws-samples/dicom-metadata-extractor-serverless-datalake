@@ -24,12 +24,12 @@ def unzip(zip_archive):
                     f'Ignore File in ZipFile, Not Valid DCM file "{file.filename}"')
             f.close()
         else:
-            log.info(f'Ignore file-path in ZipFile "{file.filename}"')
+            log.info(f'Ignore File in ZipFile, "{file.filename}"')
     return list_files
 
 
 def tar(tar_archive):
-    log.debug(f'Prep to tar/bz2/gz {tar_archive.name}')
+    log.debug(f'Prep to tar/bz2 {tar_archive.name}')
     list_files = []
     for file in tar_archive.getmembers():
         if file.isfile() and (file.name.upper().find('DICOMDIR') == -1):

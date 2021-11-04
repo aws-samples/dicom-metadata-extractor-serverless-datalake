@@ -25,7 +25,8 @@ def convert_DA(elem):
             if isinstance(date, list):
                 date_list = []
                 for item in date:
-                    date_list.append(datetime.datetime.strptime(item, '%Y%m%d').date())
+                    date_list.append(
+                        datetime.datetime.strptime(item, '%Y%m%d').date())
                 return date_list
             return datetime.datetime.strptime(date, '%Y%m%d').date()
         return datetime.datetime.fromisoformat('1900-01-01').date()
@@ -188,16 +189,19 @@ def return_float(elem):
 def convert_DT(elem):
     try:
         if not elem.is_empty:
-            # Only return YYYY-MM-DD, exclude TIMESTAMP
+            # TODO properly evaluate timestamp format before applying datetime
             # date = datetime.datetime.strptime(elem.value, '%Y%m%d').date()
             date = rep_string(elem)
             if isinstance(date, list):
                 date_list = []
                 for item in date:
-                    date_list.append(datetime.datetime.strptime(item, '%Y%m%d%H%M%S.%f%z'))
+                    #date_list.append(datetime.datetime.strptime(item, '%Y%m%d%H%M%S.%f%z'))
+                    return elem.value
                 return date_list
-            return datetime.datetime.strptime(elem.value, '%Y%m%d%H%M%S.%f%z')
-        return datetime.datetime.strptime(elem.value, '%Y%m%d%H%M%S.%f%z')
+            # return datetime.datetime.strptime(elem.value, '%Y%m%d%H%M%S.%f%z')
+            return elem.value
+        # return datetime.datetime.strptime(elem.value, '%Y%m%d%H%M%S.%f%z')
+        return elem.value
     except Exception as e:
         log.error(e)
         raise

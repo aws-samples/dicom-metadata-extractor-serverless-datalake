@@ -4,7 +4,7 @@ import tarfile
 from logger import get_logger
 import zipfile
 import utils.utils as utils
-IGNORE_FILE_EXT = ['.json', '.txt']
+IGNORE_FILE_EXT = ['.json', '.txt', '.csv']
 
 log = get_logger(__name__)
 

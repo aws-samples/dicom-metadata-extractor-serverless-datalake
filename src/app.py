@@ -18,7 +18,8 @@ S3_REGION = os.environ.get('S3_REGION', None)
 OBJ_SIZE = os.environ.get('OBJ_SIZE', None)
 LOCAL_LOCATION = os.environ.get('LOCAL_LOCATION', '/tmp')
 S3_OUTPUT_BUCKET = os.environ.get('S3_OUTPUT_BUCKET', None)
-S3_OUTPUT_BUCKET_REGION = os.environ.get('S3_OUTPUT_BUCKET_REGION', 'us-east-1')
+S3_OUTPUT_BUCKET_REGION = os.environ.get(
+    'S3_OUTPUT_BUCKET_REGION', 'us-east-1')
 GLUE_DATABASE_NAME = os.environ.get('GLUE_DATABASE_NAME', 'dicom')
 GLUE_TABLE_NAME = os.environ.get('GLUE_TABLE_NAME', 'dicom_metadata')
 MAX_LAMBDA_SIZE = os.environ.get('MAX_LAMBDA_SIZE', 500)
@@ -49,7 +50,8 @@ def output(dcm):
             sanitize_columns=True,
             s3_additional_kwargs={
                 'ServerSideEncryption': 'AES256',
-                'Tagging': parse.urlencode({"S3_BUCKET": dcm.source_s3_bucket, "S3_KEY": dcm.source_s3_key})
+                # Truncate long string for tags
+                'Tagging': parse.urlencode({"S3_BUCKET": dcm.source_s3_bucket[-128:], "S3_KEY": dcm.source_s3_key[-256:]})
             },
             partition_cols={
                 PARTITION_COL,
@@ -100,19 +102,23 @@ def lambda_handler(event, context):
     S3_KEY = event['Records'][0]['s3']['object']['key']
     S3_REGION = event['Records'][0]['awsRegion']
     OBJ_SIZE = event['Records'][0]['s3']['object']['size']
-    dcm = dcmfile(source_s3_bucket=S3_BUCKET, source_s3_bucket_region=S3_REGION, source_s3_key=S3_KEY, source_s3_size=OBJ_SIZE)
-    ds = s3file(s3bucket=dcm.source_s3_bucket, s3key=dcm.source_s3_key, s3region=dcm.source_s3_bucket_region, size=dcm.source_s3_size)
+    dcm = dcmfile(source_s3_bucket=S3_BUCKET, source_s3_bucket_region=S3_REGION,
+                  source_s3_key=S3_KEY, source_s3_size=OBJ_SIZE)
+    ds = s3file(s3bucket=dcm.source_s3_bucket, s3key=dcm.source_s3_key,
+                s3region=dcm.source_s3_bucket_region, size=dcm.source_s3_size)
     ds.eval_ext()
     if (S3_BUCKET is None or S3_KEY is None or S3_REGION is None or OBJ_SIZE is None):
         log.error(f'Empty S3 input values; S3_BUCKET={S3_BUCKET}, \
             S3_KEY={S3_KEY}, S3_REGION={S3_REGION}')
         raise ValueError
     else:
-        log.info(f'S3 input values; S3_BUCKET={S3_BUCKET}, S3_KEY={S3_KEY}, S3_REGION={S3_REGION} FileSize={OBJ_SIZE}')
+        log.info(
+            f'S3 input values; S3_BUCKET={S3_BUCKET}, S3_KEY={S3_KEY}, S3_REGION={S3_REGION} FileSize={OBJ_SIZE}')
     # DCM files can be processed on Lambda by downloading the first 10 MB to process only
     if OBJ_SIZE > (MAX_LAMBDA_SIZE * 1024 * 1024) and ds.file_ext != '.dcm':
         job_name = re.sub(r'\W+', '', S3_KEY[:128])
-        log.info(f'Filesize greater than {MAX_LAMBDA_SIZE}MB, submit to AWS BATCH Queue: {AWS_BATCH_QUEUE} JobName: {job_name}')
+        log.info(
+            f'Filesize greater than {MAX_LAMBDA_SIZE}MB, submit to AWS BATCH Queue: {AWS_BATCH_QUEUE} JobName: {job_name}')
         try:
             batch = boto3.client('batch')
             result = batch.submit_job(
@@ -167,7 +173,8 @@ def lambda_handler(event, context):
                 }
 
             )
-            log.info(f'Forwarded request to AWS Batch {dcm}, JOB_ARN: {result["jobArn"]}')
+            log.info(
+                f'Forwarded request to AWS Batch {dcm}, JOB_ARN: {result["jobArn"]}')
             return {
                 'code': 200,
                 'message': f'Forwarded request to AWS Batch {dcm}, JOB_ARN: {result["jobArn"]}'
@@ -193,9 +200,13 @@ if __name__ == '__main__':
             S3_KEY={S3_KEY}, S3_REGION={S3_REGION} OBJ_SIZE={OBJ_SIZE}')
         raise ValueError
     else:
-        log.info(f'S3 input values; S3_BUCKET={S3_BUCKET}, S3_KEY={S3_KEY}, S3_REGION={S3_REGION} OBJ_SIZE={OBJ_SIZE}')
-    dcm = dcmfile(source_s3_bucket=S3_BUCKET, source_s3_bucket_region=S3_REGION, source_s3_key=S3_KEY, source_s3_size=OBJ_SIZE)
-    ds = s3file(s3bucket=dcm.source_s3_bucket, s3key=dcm.source_s3_key, s3region=dcm.source_s3_bucket_region, size=dcm.source_s3_size)
+        log.info(
+            f'S3 input values; S3_BUCKET={S3_BUCKET}, S3_KEY={S3_KEY}, S3_REGION={S3_REGION} OBJ_SIZE={OBJ_SIZE}')
+    dcm = dcmfile(source_s3_bucket=S3_BUCKET, source_s3_bucket_region=S3_REGION,
+                  source_s3_key=S3_KEY, source_s3_size=OBJ_SIZE)
+    ds = s3file(s3bucket=dcm.source_s3_bucket, s3key=dcm.source_s3_key,
+                s3region=dcm.source_s3_bucket_region, size=dcm.source_s3_size)
     ds.eval_ext()
     output_location = inspect(dcm, ds)
-    log.info(f'Completed job INPUT s3://{S3_REGION}/{S3_BUCKET}/{S3_KEY}, OUTPUT {output_location["paths"]}')
+    log.info(
+        f'Completed job INPUT s3://{S3_REGION}/{S3_BUCKET}/{S3_KEY}, OUTPUT {output_location["paths"]}')
