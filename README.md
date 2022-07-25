@@ -72,9 +72,18 @@ Configuring SAM deploy
         Confirm changes before deploy [y/N]: y
         #SAM needs permission to be able to create roles to connect to the resources in your template
         Allow SAM CLI IAM role creation [Y/n]: y
+        	#Preserves the state of previously provisioned resources when an operation fails
+	      Disable rollback [y/N]: y
         Save arguments to configuration file [Y/n]: y
         SAM configuration file [samconfig.toml]: `HIT ENTER`
         SAM configuration environment [default]: `HIT ENTER`
+
+        Looking for resources needed for deployment:
+	      Managed S3 bucket: aws-sam-cli-managed-default-samclisourcebucket-XXXXXXXXXX
+	      A different default S3 bucket can be set in samconfig.toml
+	      Image repositories: Not found.
+	      #Managed repositories will be deleted when their functions are removed from the template and deployed
+	      Create managed ECR repositories for all functions? [Y/n]: y
 ...
 
 Previewing CloudFormation changeset before deployment
