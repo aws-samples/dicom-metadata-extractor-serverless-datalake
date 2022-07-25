@@ -117,6 +117,11 @@ class s3file():
             self.download_file()
             archive = tarfile.open(self.file_location, 'r')
             self.file_list = utils.tar(archive)
+        elif (self.file_ext == '.xz'):
+            log.info(f'Select .xz file extension, continue assuming tar.xz')
+            self.download_file()
+            archive = tarfile.open(self.file_location, 'r')
+            self.file_list = utils.tar(archive)
         else:
             log.error(f'Unexpected file extension {self.file_ext}')
             raise Exception(f'{self.file_ext} file extension not supported')
