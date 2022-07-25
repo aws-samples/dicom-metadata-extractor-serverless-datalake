@@ -233,9 +233,8 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:GetFunction
-              Resource: !Join
-                    - !GetAtt DicomParser.Arn
-                    - ":*"
+              Resource: !Join [':', [!GetAtt DicomParser.Arn, '*']]
+                
       Timeout: 30
       # python 3.7 includes cfn-response module
       Runtime: python3.7
